@@ -1,0 +1,3 @@
+import enterScholar
+
+enterScholar.loginSanim()
