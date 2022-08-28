@@ -60,3 +60,32 @@ def removeExcelFiles(pathsave):
     filelist = glob.glob(os.path.join(pathsave, "*.xlsx"))
     for f in filelist:
         os.remove(f)
+        
+        
+import pandas as pd
+
+
+df = pd.read_excel(r'D:\projects\report\excelfiles\1395\ezhar\Excel.xlsx')
+
+
+
+str_1 = ''
+
+insert_c = ''
+insert_p = ''
+for c in df.columns:
+    str_1 += '[%s] NVARCHAR(MAX) NOT NULL,' % c
+    insert_c += '[%s],' % c
+    insert_p += '?,'
+    
+insert_p = insert_p.rsplit(',', 1)[0]
+
+insert_c = insert_c.rsplit(',', 1)[0]
+
+    
+str_2 = 'create table [dbo].[testDb].[tblGhateeSaderShode] \n ([id] INT IDENTITY(1,1), PRIMARY KEY ([id]),%s)' % str_1
+
+insert_1 = """INSERT INTO [dbo].[tbltesting] \n
+(%s) \n
+VALUES (%s)
+""" % (insert_c, insert_p)
