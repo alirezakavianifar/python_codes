@@ -1,0 +1,269 @@
+from selenium import webdriver
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
+from selenium.webdriver import ActionChains
+import time
+import glob
+import os.path
+import xlwings as xw
+import pyodbc
+import pandas as pd
+from datetime import date
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException
+from pathlib import Path
+import openpyxl 
+import numpy as np
+import jdatetime
+from datetime import datetime
+import time
+import argparse
+from helpers import input_info, open_and_save_excel_files, get_update_date, time_it, check_if_up_to_date, log_it
+from sql_queries_1 import create_sql_table, insert_into, insert_into_tblAnbareKoliHist, insert_into_tblAnbare99Mashaghel, insert_into_tblAnbare99Sherkatha, insert_into_tblHesabrasiArzeshAfzoode
+
+
+
+n_retries = 0
+message_logs = ''
+
+
+
+
+
+class DumpToSQL:
+    
+    def __init__(self, report_type=None, table=None, year=None, sql_delete=None, path=None):
+        self.report_type = report_type
+        self.table = table
+        self.year = year
+        self.sql_delete = sql_delete
+        self.path= path
+        
+    
+    def check(self,df,col):
+        if col in df:
+            return True
+        else:
+            return False
+
+    @time_it
+    def connect_to_sql(self, sql_query, df_values='default', read_from_sql=False, connect_type=None):
+
+            
+        global n_retries
+        def retry():
+                
+                server = '.'
+                database = 'testdb'
+                username = 'sa'
+                password = '14579Ali.'
+                cnxn = pyodbc.connect(
+                    'DRIVER={SQL Server};SERVER=' + server + ';DATABASE=' + database + ';UID=' + username + ';PWD=' + password)
+                cursor = cnxn.cursor()
+                
+                if (read_from_sql):
+                    df = pd.read_sql(sql_query, cnxn)
+                    return df
+                
+                if df_values=='default':
+                    cursor.execute(sql_query)
+                    cursor.execute('commit')                    
+                else:
+                    cursor.executemany(sql_query, df_values)
+                    cursor.execute('commit')
+                cnxn.close()
+                    
+        try:
+            retry()
+            
+        except Exception as e:
+            if n_retries < 6:
+                n_retries+= 1
+                print (e)
+                time.sleep(3)
+                print('trying again')
+                time.sleep(4)
+                retry()
+        
+        # self.connect_to_sql(sql_query)
+        
+################################################################################################################################
+        
+        # self.connect_to_sql(sql_insert, df_values)
+        
+
+    def dump_to_sql(self):
+
+        merge_excels=[]
+               
+        open_and_save_excel_files(self.path)
+            # read the csv file
+        excel_files = glob.glob(os.path.join(self.path , "*.xlsx"))
+        
+        # Convert excel files into dataframes
+        for f in excel_files:
+            if f==r'C:\ezhar-temp\%s\%s\Excel.xlsx' % (self.year, self.report_type):
+                df = pd.read_excel(f)
+                
+                if (self.check(df, "منبع مالیاتی") == False):
+                    df.insert(11, column='منبع مالیاتی', value='مالیات بر درآمد شرکت ها')
+                merge_excels.append(df)
+                
+            if f==r'C:\ezhar-temp\%s\%s\Excel(1).xlsx' % (self.year, self.report_type):
+                df = pd.read_excel(f)
+                if (self.check(df, "منبع مالیاتی") == False):
+                    df.insert(11, column='منبع مالیاتی', value='مالیات بر درآمد مشاغل')
+                merge_excels.append(df)
+                
+            if f==r'C:\ezhar-temp\%s\%s\Excel(2).xlsx' % (self.year, self.report_type):
+                df = pd.read_excel(f)
+                if (self.check(df, "منبع مالیاتی") == False):
+                    df.insert(11, column='منبع مالیاتی', value='مالیات بر ارزش افزوده')
+                merge_excels.append(df)           
+        
+        # Merge all dataframes into one        
+        final_df_all_fine_grained = pd.concat(merge_excels)
+        
+        # Clean the Dataframe
+        final_df_all_fine_grained = final_df_all_fine_grained.fillna(value=0)
+        final_df_all_fine_grained['تاریخ بروزرسانی']= get_update_date()
+        final_df_all_fine_grained['شناسه ملی / کد ملی (TIN)'] = final_df_all_fine_grained['شناسه ملی / کد ملی (TIN)'].astype(str)
+        final_df_all_fine_grained['شناسه اظهارنامه']= final_df_all_fine_grained['شناسه اظهارنامه'].astype(str)
+        
+        
+        if (self.check(final_df_all_fine_grained, "سال عملکرد") == False):
+            final_df_all_fine_grained.insert(2, column='سال عملکرد', value=self.year)
+            
+        if (self.check(final_df_all_fine_grained, "کد پستی مودی") == False):
+            final_df_all_fine_grained.insert(6, column='کد پستی مودی', value='none')
+           
+        if (self.check(final_df_all_fine_grained, "نوع ریسک اظهارنامه") == False):
+            final_df_all_fine_grained.insert(21, column='نوع ریسک اظهارنامه', value='none')
+            
+        if (self.check(final_df_all_fine_grained, "مالیات تشخیص")):
+            final_df_all_fine_grained['مالیات تشخیص']= final_df_all_fine_grained['مالیات تشخیص'].astype(np.int64)
+        
+        if (self.check(final_df_all_fine_grained, "مالیات قطعی")):
+            final_df_all_fine_grained['مالیات قطعی']= final_df_all_fine_grained['مالیات قطعی'].astype(np.int64)
+      
+        if (self.check(final_df_all_fine_grained, "برگ مطالبه جرایم موضوع ماده 169 ق.م.م")):
+            final_df_all_fine_grained['برگ مطالبه جرایم موضوع ماده 169 ق.م.م']= final_df_all_fine_grained['برگ مطالبه جرایم موضوع ماده 169 ق.م.م'].astype(np.int64)
+
+        if (self.check(final_df_all_fine_grained, "کد رهگیری ثبت نام")):
+            final_df_all_fine_grained['کد رهگیری ثبت نام']= final_df_all_fine_grained['کد رهگیری ثبت نام'].astype(np.int64)
+
+        if (self.check(final_df_all_fine_grained, "مالیات ابرازی")):
+            final_df_all_fine_grained['مالیات ابرازی']= final_df_all_fine_grained['مالیات ابرازی'].astype(np.int64)
+            
+        if (self.check(final_df_all_fine_grained, "درآمد ابرازی")):
+            final_df_all_fine_grained['درآمد ابرازی']= final_df_all_fine_grained['درآمد ابرازی'].astype(np.int64)    
+            
+
+        if (self.report_type=='ezhar'):
+            final_df_all_fine_grained['عوارض ابرازی']= final_df_all_fine_grained['عوارض ابرازی'].astype(np.int64)
+            final_df_all_fine_grained['کد رهگیری اظهارنامه']= final_df_all_fine_grained['کد رهگیری اظهارنامه'].astype(str)
+            final_df_all_fine_grained['فروش ابرازی']= final_df_all_fine_grained['فروش ابرازی'].astype(np.int64)
+            final_df_all_fine_grained['اعتبار ابرازی']= final_df_all_fine_grained['اعتبار ابرازی'].astype(np.int64)
+            
+        elif (self.report_type=='tashkhis_sader_shode'  or self.report_type=='tashkhis_eblagh_shode' or self.report_type == 'ghatee_sader_shode' or self.report_type == 'ghatee_eblagh_shode'):
+            
+            
+            
+            if (self.check(final_df_all_fine_grained, "کد ملی حسابرس اصلی")):
+                final_df_all_fine_grained['کد ملی حسابرس اصلی']= final_df_all_fine_grained['کد ملی حسابرس اصلی'].astype(np.int64)
+                
+            if (self.check(final_df_all_fine_grained, "شماره برگه تشخیص")):
+                final_df_all_fine_grained['شماره برگه تشخیص']= final_df_all_fine_grained['شماره برگه تشخیص'].astype(str)
+               
+            if (self.check(final_df_all_fine_grained, "مالیات تشخیص")):
+                final_df_all_fine_grained['مالیات تشخیص']= final_df_all_fine_grained['مالیات تشخیص'].astype(np.int64)
+                
+            if (self.check(final_df_all_fine_grained, "فروش تشخیص")):
+                final_df_all_fine_grained['فروش تشخیص']= final_df_all_fine_grained['فروش تشخیص'].astype(np.int64)
+            
+            if (self.check(final_df_all_fine_grained, "درآمد تشخیص")):
+                final_df_all_fine_grained['درآمد تشخیص']= final_df_all_fine_grained['درآمد تشخیص'].astype(np.int64)
+                
+            if (self.check(final_df_all_fine_grained, "عوارض تشخیص")):
+                final_df_all_fine_grained['عوارض تشخیص']= final_df_all_fine_grained['عوارض تشخیص'].astype(np.int64)
+                
+            if (self.check(final_df_all_fine_grained, "درآمد قطعی")):
+                final_df_all_fine_grained['درآمد قطعی']= final_df_all_fine_grained['درآمد قطعی'].astype(np.int64)
+                
+            if (self.check(final_df_all_fine_grained, "عوارض قطعی")):
+                final_df_all_fine_grained['عوارض قطعی']= final_df_all_fine_grained['عوارض قطعی'].astype(np.int64)
+                
+            if (self.check(final_df_all_fine_grained, "اعتبار قطعی")):
+                final_df_all_fine_grained['اعتبار قطعی']= final_df_all_fine_grained['اعتبار قطعی'].astype(np.int64)
+                
+            if (self.check(final_df_all_fine_grained, "پرداخت")):
+                final_df_all_fine_grained['پرداخت']= final_df_all_fine_grained['پرداخت'].astype(np.int64)   
+                
+            if (self.check(final_df_all_fine_grained, "مانده بدهی")):
+                final_df_all_fine_grained['مانده بدهی']= final_df_all_fine_grained['مانده بدهی'].astype(np.int64)  
+                
+            if (self.check(final_df_all_fine_grained, "شماره برگ تشخیص")):
+                final_df_all_fine_grained['شماره برگ تشخیص']= final_df_all_fine_grained['شماره برگ تشخیص'].astype(np.int64)   
+                
+            if (self.check(final_df_all_fine_grained, "مالیات")):
+                final_df_all_fine_grained['مالیات']= final_df_all_fine_grained['مالیات'].astype(np.int64)                   
+        df_values = final_df_all_fine_grained.values.tolist()
+        
+        # print(final_df_all_fine_grained.columns)
+
+        #self.create_sql_table(table)
+        # Drop existing table
+        self.connect_to_sql(self.sql_delete, connect_type='dropping sql table')
+        
+
+        columns = final_df_all_fine_grained.columns
+        self.sql_create_table = create_sql_table(self.table, columns)
+        self.sql_query = insert_into(self.table, columns)
+        
+        
+        # Create a new table
+        self.connect_to_sql(self.sql_create_table, connect_type='creating sql table')
+        
+        # insert data into table
+        self.connect_to_sql(self.sql_query, df_values, connect_type='inserting into sql table')
+        
+        
+    def create_anbare_reports(self, year):
+        sql_query = insert_into_tblAnbareKoliHist(year)
+        self.connect_to_sql(sql_query)
+        
+    def create_Anbare99Mashaghel_reports(self, year):
+        sql_query = insert_into_tblAnbare99Mashaghel(year)
+        self.connect_to_sql(sql_query)
+        
+    def create_Anbare99Sherkatha_reports(self, year):
+        sql_query = insert_into_tblAnbare99Sherkatha(year)
+        self.connect_to_sql(sql_query)
+        
+        
+    def create_hesabrasiArzeshAfzoode_reports(self, year):
+        sql_query = insert_into_tblHesabrasiArzeshAfzoode(year)
+        self.connect_to_sql(sql_query)
+
+
+    
+        
+# if __name__ == "__main__":        
+   
+#     print('start')
+#     report_types, years = input_info()
+                    
+    
+#     for year in years:
+        
+#         for report_type in report_types:
+            
+#             table = table_name(report_type)
+                
+#             path = r'C:\ezhar-temp\%s\%s' % (year, report_type)
+
+#             sql_query = insert_into(table)
+#             dump = DumpToSQL(year, table, sql_query, path)
+#             dump.dump_to_sql()
