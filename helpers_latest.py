@@ -349,3 +349,21 @@ def init_driver(pathsave):
     driver.switch_to.window(driver.window_handles[0])
     
     return driver
+
+
+def pivot_table():
+    path = r'D:\projects\data\iris\test.xlsx'
+    df = pd.read_excel(path)
+
+    df = df.loc[df['منبع مالیاتی']]
+
+    sources = list(df['منبع مالیاتی'].unique())
+
+    cols = df.columns
+
+    df = df[df['منبع مالیاتی'].isin(sources)]
+
+
+    p_df_1 = pd.pivot_table(df, values='کد اداره',
+                            index= 'نام اداره', columns=['منبع مالیاتی', 'سال عملکرد'], aggfunc=len, 
+                            fill_value=0, margins=True, margins_name='جمع کلی')
